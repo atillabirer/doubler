@@ -29,11 +29,9 @@ interface Investment {
     "/",
     async function (req: Request, res: Response, next: NextFunction) {
       try {
-        //first check if we have balance to pay the previous person in the queue
-        //who was no tpaid
-
+        // check the payments queue, get the first unpaid address from database
         if (req.body.txid) {
-          let value = 0;
+          var value = 0;
 
           const obj = await rpc.getRawTransactionAsObject(req.body.txid);
           obj.vout.forEach((singlevout) => {
@@ -44,6 +42,39 @@ interface Investment {
             //this is the value of what they sent to us
             if (searchResult) {
               value = singlevout.value!; //it exists damn you
+              db.get(
+                "SELECT * FROM investments WHERE paid=0 AND amount ORDER BY id ASC",
+                async (err, row) => {
+                  console.log("row", row);
+
+                  if (!row) return;
+
+                  try {
+                    const balance = await rpc.getBalance();
+                    if (balance >= row.amount) {
+                      console.log("doubleToFixed", row.amount.toFixed(8));
+                      const rpcReply = await rpc.sendToAddress(
+                        row.address,
+                        "0.0001"
+                      );
+                      console.log("rpcReply:", rpcReply);
+                      if (!rpcReply.includes("Error")) {
+                        //awsum
+                        console.log(await rpc.getTransaction(rpcReply));
+                        db.run(
+                          "UPDATE investments SET paid=1 WHERE txid = ?",
+                          [row.txid],
+                          (err) => {
+                            console.log("updateErr:", err);
+                          }
+                        );
+                      }
+                    }
+                  } catch (error) {
+                    next(error);
+                  }
+                }
+              );
             }
           });
 
@@ -66,7 +97,8 @@ interface Investment {
               if (
                 !investments.find(
                   (investment) => investment.txid === req.body.txid
-                )
+                ) &&
+                Math.ceil(value) > 0
               ) {
                 investments.push({
                   address: sender!,
@@ -75,6 +107,7 @@ interface Investment {
                   timestamp: Date.now(),
                   paid: false,
                 });
+                console.log("dbVal", value);
                 db.run(
                   "INSERT INTO investments(address,amount,txid,timestamp,paid) VALUES($address,$amount,$txid,$timestamp,$paid)",
                   {
@@ -106,7 +139,9 @@ interface Investment {
   );
 
   app.get("/transactions", function (req, res) {
-    res.json(investments);
+    db.all("SELECT * FROM investments", (err, rows) => {
+      res.json(rows);
+    });
   });
   app.listen(3000, () => console.log(":3000"));
 })();
