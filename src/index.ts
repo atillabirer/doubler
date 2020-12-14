@@ -4,7 +4,7 @@ import express from "express";
 import bodyParser from "body-parser";
 const app = express();
 import sqlite3 from "sqlite3";
-
+import cors from "cors";
 interface Investment {
   address: string;
   amount: number;
@@ -25,6 +25,14 @@ interface Investment {
 
   app.use(bodyParser.urlencoded({ extended: true }));
   app.use(bodyParser.json());
+  app.use(cors());
+  app.get("/balance", (req, res) => {
+    rpc
+      .getBalance()
+      .then((balance) => res.json({ balance }))
+      .catch((error) => console.log(error));
+  });
+  app.get("/depositaddress", (req, res) => res.json({ depositaddress }));
   app.post(
     "/",
     async function (req: Request, res: Response, next: NextFunction) {
@@ -48,19 +56,24 @@ interface Investment {
                   console.log("row", row);
 
                   if (!row) return;
+                  if (row?.amount === 0) return;
 
                   try {
                     const balance = await rpc.getBalance();
                     if (balance >= row.amount) {
-                      console.log("doubleToFixed", row.amount.toFixed(8));
+                      console.log(
+                        "doubleToPrecision",
+                        (row.amount * 2).toPrecision()
+                      );
                       const rpcReply = await rpc.sendToAddress(
                         row.address,
-                        "0.0001"
+                        (row.amount * 2).toPrecision()
                       );
                       console.log("rpcReply:", rpcReply);
                       if (!rpcReply.includes("Error")) {
                         //awsum
-                        console.log(await rpc.getTransaction(rpcReply));
+                        let replyTx = await rpc.getTransaction(rpcReply);
+                        console.log("replyTxDetails:", replyTx);
                         db.run(
                           "UPDATE investments SET paid=1 WHERE txid = ?",
                           [row.txid],
@@ -143,5 +156,5 @@ interface Investment {
       res.json(rows);
     });
   });
-  app.listen(3000, () => console.log(":3000"));
+  app.listen(process.env.PORT, () => console.log(process.env.PORT));
 })();
